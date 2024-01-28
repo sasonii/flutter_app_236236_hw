@@ -2,6 +2,7 @@ import 'package:english_words/english_words.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -15,6 +16,7 @@ class AuthNotifier extends ChangeNotifier {
   FirebaseAuth _auth = FirebaseAuth.instance;
   User? _user;
   Status _status = Status.Uninitialized;
+  FirebaseFirestore _firestore = FirebaseFirestore.instance;
   AuthNotifier() {
     _auth.authStateChanges().listen(_onStateChanged);
   }
@@ -63,6 +65,34 @@ class AuthNotifier extends ChangeNotifier {
       _status = Status.Authenticated;
     }
     notifyListeners();
+  }
+
+  Future<void> saveWord(WordPair wordPair) async {
+    if (_user != null) {
+      await _firestore.collection('users').doc(_user!.uid).collection('words').doc(wordPair.asPascalCase).set({
+        'first': wordPair.first,
+        'second': wordPair.second,
+      });
+    }
+  }
+
+  Future<List<WordPair>> loadWords() async {
+    List<WordPair> wordPairs = [];
+
+    if (_user != null) {
+      QuerySnapshot snapshot = await _firestore.collection('users').doc(_user!.uid).collection('words').get();
+      for (var doc in snapshot.docs) {
+        wordPairs.add(WordPair(doc['first'], doc['second']));
+      }
+    }
+
+    return wordPairs;
+  }
+
+  Future<void> removeWord(WordPair wordPair) async {
+    if (_user != null) {
+      await _firestore.collection('users').doc(_user!.uid).collection('words').doc(wordPair.asPascalCase).delete();
+    }
   }
 }
 
@@ -162,13 +192,12 @@ class _RandomWordsState extends State<RandomWords> {
                             "Are you sure you wish to delete this item?"),
                         actions: <Widget>[
                           TextButton(
-                            style: TextButton.styleFrom(
-                              backgroundColor: Colors.deepPurple,
-                              foregroundColor: Colors.white,
-                            ),
+                              style: TextButton.styleFrom(
+                                backgroundColor: Colors.deepPurple,
+                                foregroundColor: Colors.white,
+                              ),
                               onPressed: () => Navigator.of(context).pop(true),
                               child: const Text("Yes")),
-                              
                           TextButton(
                             style: TextButton.styleFrom(
                               backgroundColor: Colors.deepPurple,
@@ -197,7 +226,6 @@ class _RandomWordsState extends State<RandomWords> {
                     ),
                   );
                 },
-                
                 child: ListTile(
                   title: Text(
                     pair.asPascalCase,
