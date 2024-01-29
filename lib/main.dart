@@ -17,17 +17,26 @@ class AuthNotifier extends ChangeNotifier {
   User? _user;
   Status _status = Status.Uninitialized;
   FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  Set<WordPair> _saved = <WordPair>{};
+
   AuthNotifier() {
     _auth.authStateChanges().listen(_onStateChanged);
   }
   Status get status => _status;
   User? get user => _user;
 
-  Future<bool> signIn(String email, String password) async {
+  Future<bool> signIn(String email, String password, Set<WordPair> wordPairs) async {
     try {
       _status = Status.Authenticating;
       notifyListeners();
       await _auth.signInWithEmailAndPassword(email: email, password: password);
+      _saved = await loadWords();
+      _saved.addAll(wordPairs);
+    
+      for (var wordPair in wordPairs) {
+        await saveWord(wordPair);
+      }
       return true;
     } catch (e) {
       _status = Status.Unauthenticated;
@@ -36,12 +45,17 @@ class AuthNotifier extends ChangeNotifier {
     }
   }
 
-  Future<bool> signUp(String email, String password) async {
+  Future<bool> signUp(String email, String password, Set<WordPair> wordPairs) async {
     try {
       _status = Status.Authenticating;
       notifyListeners();
       await _auth.createUserWithEmailAndPassword(
           email: email, password: password);
+      _saved = wordPairs;
+    
+      for (var wordPair in _saved) {
+        await saveWord(wordPair);
+      }
       return true;
     } catch (e) {
       _status = Status.Unauthenticated;
@@ -53,6 +67,8 @@ class AuthNotifier extends ChangeNotifier {
   Future signOut() async {
     _auth.signOut();
     _status = Status.Uninitialized;
+    _user = null;
+    _saved.clear();
     notifyListeners();
     return Future.delayed(Duration.zero);
   }
@@ -60,9 +76,11 @@ class AuthNotifier extends ChangeNotifier {
   Future<void> _onStateChanged(User? user) async {
     if (user == null) {
       _status = Status.Uninitialized;
+      _saved.clear();
     } else {
       _user = user;
       _status = Status.Authenticated;
+      _saved = await loadWords();
     }
     notifyListeners();
   }
@@ -73,11 +91,12 @@ class AuthNotifier extends ChangeNotifier {
         'first': wordPair.first,
         'second': wordPair.second,
       });
+      _saved.add(wordPair); 
     }
   }
 
-  Future<List<WordPair>> loadWords() async {
-    List<WordPair> wordPairs = [];
+  Future<Set<WordPair>> loadWords() async {
+    Set<WordPair> wordPairs = {};
 
     if (_user != null) {
       QuerySnapshot snapshot = await _firestore.collection('users').doc(_user!.uid).collection('words').get();
@@ -91,6 +110,7 @@ class AuthNotifier extends ChangeNotifier {
 
   Future<void> removeWord(WordPair wordPair) async {
     if (_user != null) {
+      _saved.remove(wordPair);
       await _firestore.collection('users').doc(_user!.uid).collection('words').doc(wordPair.asPascalCase).delete();
     }
   }
@@ -215,6 +235,7 @@ class _RandomWordsState extends State<RandomWords> {
                 onDismissed: (DismissDirection direction) {
                   setState(() {
                     _saved.remove(pair);
+                    context.read<AuthNotifier>().removeWord(pair);
                   });
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -298,10 +319,10 @@ class _RandomWordsState extends State<RandomWords> {
                         String email = emailController.text;
                         String password = passwordController.text;
                         Status status = context.read<AuthNotifier>().status;
-                        if (status == Status.Uninitialized) {
+                        if (status == Status.Uninitialized || status == Status.Unauthenticated) {
                           var res = await context
                               .read<AuthNotifier>()
-                              .signIn(email, password);
+                              .signIn(email, password, _saved);
                           if (res) {
                             Navigator.of(context).pop();
                           } else {
@@ -328,10 +349,10 @@ class _RandomWordsState extends State<RandomWords> {
                         String email = emailController.text;
                         String password = passwordController.text;
                         Status status = context.read<AuthNotifier>().status;
-                        if (status == Status.Uninitialized) {
+                        if (status == Status.Uninitialized || status == Status.Unauthenticated) {
                           var res = await context
                               .read<AuthNotifier>()
-                              .signUp(email, password);
+                              .signUp(email, password, _saved);
                           if (res) {
                             Navigator.of(context).pop();
                           } else {
@@ -360,6 +381,7 @@ class _RandomWordsState extends State<RandomWords> {
   void _logout() {
     Status status = context.read<AuthNotifier>().status;
     if (status == Status.Authenticated) {
+      _saved.clear();
       context.read<AuthNotifier>().signOut();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -386,6 +408,8 @@ class _RandomWordsState extends State<RandomWords> {
   @override
   Widget build(BuildContext context) {
     Status status = context.watch<AuthNotifier>().status;
+    Set<WordPair> userSaved = context.read<AuthNotifier>()._saved;
+    _saved.addAll(userSaved);
     return Scaffold(
       // NEW from here ...
       appBar: AppBar(
@@ -431,8 +455,10 @@ class _RandomWordsState extends State<RandomWords> {
               setState(() {
                 if (alreadySaved) {
                   _saved.remove(_suggestions[index]);
+                  context.read<AuthNotifier>().removeWord(_suggestions[index]);
                 } else {
                   _saved.add(_suggestions[index]);
+                  context.read<AuthNotifier>().saveWord(_suggestions[index]);
                 }
               });
             },
