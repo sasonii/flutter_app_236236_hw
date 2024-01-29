@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 class LoginPage extends StatelessWidget {
   final Set<WordPair> saved;
 
-  LoginPage({required this.saved});
+  const LoginPage({required this.saved});
   @override
   Widget build(BuildContext context) {
     // Define the controllers

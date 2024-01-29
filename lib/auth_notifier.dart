@@ -6,10 +6,10 @@ import 'package:english_words/english_words.dart';
 enum Status { Uninitialized, Authenticated, Authenticating, Unauthenticated }
 
 class AuthNotifier extends ChangeNotifier {
-  FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   User? _user;
   Status _status = Status.Uninitialized;
-  FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   Set<WordPair> _saved = <WordPair>{};
 
@@ -25,18 +25,22 @@ class AuthNotifier extends ChangeNotifier {
       _status = Status.Authenticating;
       notifyListeners();
       await _auth.signInWithEmailAndPassword(email: email, password: password);
-      _saved = await loadWords();
-      _saved.addAll(wordPairs);
-    
-      for (var wordPair in wordPairs) {
-        await saveWord(wordPair);
-      }
-      return true;
+      
     } catch (e) {
       _status = Status.Unauthenticated;
       notifyListeners();
       return false;
     }
+    try {
+      _saved = await loadWords();
+      _saved.addAll(wordPairs);
+    
+      saveWords(wordPairs);
+      return true;
+    } catch (e) {
+      return true;
+    }
+    
   }
 
   Future<bool> signUp(String email, String password, Set<WordPair> wordPairs) async {
@@ -46,15 +50,18 @@ class AuthNotifier extends ChangeNotifier {
       await _auth.createUserWithEmailAndPassword(
           email: email, password: password);
       _saved = wordPairs;
-    
-      for (var wordPair in _saved) {
-        await saveWord(wordPair);
-      }
-      return true;
     } catch (e) {
       _status = Status.Unauthenticated;
       notifyListeners();
       return false;
+    }
+
+    try {
+      saveWords(wordPairs);
+      return true;
+    } catch (e) {
+      return true;
+      // firebase problem, no need to handle :/
     }
   }
 
@@ -78,7 +85,28 @@ class AuthNotifier extends ChangeNotifier {
     }
     notifyListeners();
   }
+Future<void> saveWords(Set<WordPair> wordPairs) async {
+  if (_user != null) {
+    WriteBatch batch = _firestore.batch();
 
+    wordPairs.forEach((wordPair) {
+      DocumentReference docRef = _firestore
+          .collection('users')
+          .doc(_user!.uid)
+          .collection('words')
+          .doc(wordPair.asPascalCase);
+
+      batch.set(docRef, {
+        'first': wordPair.first,
+        'second': wordPair.second,
+      });
+
+      _saved.add(wordPair);
+    });
+
+    return await batch.commit();
+  }
+}
   Future<void> saveWord(WordPair wordPair) async {
     if (_user != null) {
       await _firestore.collection('users').doc(_user!.uid).collection('words').doc(wordPair.asPascalCase).set({
