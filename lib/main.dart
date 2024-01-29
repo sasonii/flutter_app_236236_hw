@@ -168,11 +168,30 @@ class RandomWords extends StatefulWidget {
   State<RandomWords> createState() => _RandomWordsState();
 }
 
-class _RandomWordsState extends State<RandomWords> {
+class _RandomWordsState extends State<RandomWords>  with WidgetsBindingObserver{
   final _suggestions = <WordPair>[];
   final _biggerFont = const TextStyle(fontSize: 18);
   final _saved = <WordPair>{};
+  @override
+    void initState() {
+      super.initState();
+      WidgetsBinding.instance.addObserver(this);
+    }
 
+    @override
+    void dispose() {
+      WidgetsBinding.instance.removeObserver(this);
+      super.dispose();
+    }
+
+    @override
+    void didChangeAppLifecycleState(AppLifecycleState state) {
+      if (state == AppLifecycleState.paused) {
+        // App is being paused (closed)
+        final authNotifier = context.read<AuthNotifier>();
+        authNotifier.signOut();
+      }
+    }
   void _pushSaved() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
