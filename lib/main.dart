@@ -1,119 +1,13 @@
 import 'package:english_words/english_words.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+import 'auth_notifier.dart';
+import 'login_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(App());
-}
-
-enum Status { Uninitialized, Authenticated, Authenticating, Unauthenticated }
-
-class AuthNotifier extends ChangeNotifier {
-  FirebaseAuth _auth = FirebaseAuth.instance;
-  User? _user;
-  Status _status = Status.Uninitialized;
-  FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  Set<WordPair> _saved = <WordPair>{};
-
-  AuthNotifier() {
-    _auth.authStateChanges().listen(_onStateChanged);
-  }
-  Status get status => _status;
-  User? get user => _user;
-
-  Future<bool> signIn(String email, String password, Set<WordPair> wordPairs) async {
-    try {
-      _status = Status.Authenticating;
-      notifyListeners();
-      await _auth.signInWithEmailAndPassword(email: email, password: password);
-      _saved = await loadWords();
-      _saved.addAll(wordPairs);
-    
-      for (var wordPair in wordPairs) {
-        await saveWord(wordPair);
-      }
-      return true;
-    } catch (e) {
-      _status = Status.Unauthenticated;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  Future<bool> signUp(String email, String password, Set<WordPair> wordPairs) async {
-    try {
-      _status = Status.Authenticating;
-      notifyListeners();
-      await _auth.createUserWithEmailAndPassword(
-          email: email, password: password);
-      _saved = wordPairs;
-    
-      for (var wordPair in _saved) {
-        await saveWord(wordPair);
-      }
-      return true;
-    } catch (e) {
-      _status = Status.Unauthenticated;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  Future signOut() async {
-    _auth.signOut();
-    _status = Status.Uninitialized;
-    _user = null;
-    _saved.clear();
-    notifyListeners();
-    return Future.delayed(Duration.zero);
-  }
-
-  Future<void> _onStateChanged(User? user) async {
-    if (user == null) {
-      _status = Status.Uninitialized;
-      _saved.clear();
-    } else {
-      _user = user;
-      _status = Status.Authenticated;
-      _saved = await loadWords();
-    }
-    notifyListeners();
-  }
-
-  Future<void> saveWord(WordPair wordPair) async {
-    if (_user != null) {
-      await _firestore.collection('users').doc(_user!.uid).collection('words').doc(wordPair.asPascalCase).set({
-        'first': wordPair.first,
-        'second': wordPair.second,
-      });
-      _saved.add(wordPair); 
-    }
-  }
-
-  Future<Set<WordPair>> loadWords() async {
-    Set<WordPair> wordPairs = {};
-
-    if (_user != null) {
-      QuerySnapshot snapshot = await _firestore.collection('users').doc(_user!.uid).collection('words').get();
-      for (var doc in snapshot.docs) {
-        wordPairs.add(WordPair(doc['first'], doc['second']));
-      }
-    }
-
-    return wordPairs;
-  }
-
-  Future<void> removeWord(WordPair wordPair) async {
-    if (_user != null) {
-      _saved.remove(wordPair);
-      await _firestore.collection('users').doc(_user!.uid).collection('words').doc(wordPair.asPascalCase).delete();
-    }
-  }
 }
 
 class App extends StatelessWidget {
@@ -296,102 +190,7 @@ class _RandomWordsState extends State<RandomWords>  with WidgetsBindingObserver{
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) {
-          // Define the controllers
-          final emailController = TextEditingController();
-          final passwordController = TextEditingController();
-          // login screen with username and password
-          return Scaffold(
-              appBar: AppBar(
-                title: const Text('Login'),
-              ),
-              body: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    // text that says "Login"
-                    const Text(
-                      'Welcome to Startup Names Generator, please log in',
-                      style: TextStyle(
-                        fontSize: 14,
-                      ),
-                    ),
-
-                    TextField(
-                      controller: emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                      ),
-                    ),
-                    TextField(
-                      controller: passwordController,
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                      ),
-                      obscureText: true,
-                    ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () async {
-                        String email = emailController.text;
-                        String password = passwordController.text;
-                        Status status = context.read<AuthNotifier>().status;
-                        if (status == Status.Uninitialized || status == Status.Unauthenticated) {
-                          var res = await context
-                              .read<AuthNotifier>()
-                              .signIn(email, password, _saved);
-                          if (res) {
-                            Navigator.of(context).pop();
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'There was an error logging into the app',
-                                  textAlign: TextAlign.center,
-                                ),
-                                backgroundColor: Colors.deepPurple,
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      child: const Text('Log in'),
-                    ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () async {
-                        String email = emailController.text;
-                        String password = passwordController.text;
-                        Status status = context.read<AuthNotifier>().status;
-                        if (status == Status.Uninitialized || status == Status.Unauthenticated) {
-                          var res = await context
-                              .read<AuthNotifier>()
-                              .signUp(email, password, _saved);
-                          if (res) {
-                            Navigator.of(context).pop();
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'There was an error logging into the app',
-                                  textAlign: TextAlign.center,
-                                ),
-                                backgroundColor: Colors.deepPurple,
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      child: const Text('Sign up'),
-                    ),
-                  ],
-                ),
-              ));
+          return LoginPage(saved: _saved);
         },
       ),
     );
@@ -427,7 +226,7 @@ class _RandomWordsState extends State<RandomWords>  with WidgetsBindingObserver{
   @override
   Widget build(BuildContext context) {
     Status status = context.watch<AuthNotifier>().status;
-    Set<WordPair> userSaved = context.read<AuthNotifier>()._saved;
+    Set<WordPair> userSaved = context.read<AuthNotifier>().saved;
     _saved.addAll(userSaved);
     return Scaffold(
       // NEW from here ...
